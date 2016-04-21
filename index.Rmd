@@ -5,26 +5,84 @@ date: "21 april 2016"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+## Synopsis
+This document represents the course project in the Coursera Practical machine learning course. Briefly, using data from the [HAR data set](http://groupware.les.inf.puc-rio.br/har), the goal was to predict the manner in which subjects did the exercise, represented by the `classe` variable.
+
+## Data processing
+
+### Preparation
+For this analysis, two external packages were attached. If needed, run `install.packages()` before sourcing the following script.
+```{r message = FALSE}
+library(caret)
+library(randomForest)
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+The [training data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and [test data](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv) were downloaded to the working directory. Manual inspection revealed that NA values were recorded as `NA`, `#DIV/0!` or blank entries. The raw data files were loaded into R:
+```{r}
+trainData <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testData <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+dim(trainData)
+dim(testData)
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+### Preprocessing
+```{r}
+table(colSums(is.na(trainData)))
+table(colSums(is.na(testData)))
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+The tables above demonstrate that 100 of the 160 columns contain a vast majority of NA's (and the remaining 60 variables no NA's). I therefore decided to remove these variables:
+```{r}
+trainDataClean <- trainData[, colSums(is.na(trainData)) == 0] 
+testDataClean <- testData[, colSums(is.na(testData)) == 0] 
+```
+
+By manual inspection and personal judgement, I also decided to drop the first seven variables since they did not seem to be reasonable predictors:
+```{r}
+trainDataClean <- trainDataClean[, 8:length(trainDataClean)] 
+testDataClean <- testDataClean[, 8:length(testDataClean)]
+dim(trainDataClean)
+dim(testDataClean)
+```
+
+This left us with two data frames with 52 identical variables (predictors) in both data sets. Column 53 in the training data set represents the `classe` to be predicted, and the last column in the testing data is the `problem_id` for the second part of the assignment. The final preprocessing step was to see if any predictors displayed near-zero-variance since this could be a problem:
+```{r}
+nearZeroV <- nearZeroVar(trainDataClean[, 1:52], saveMetrics = T)
+table(nearZeroV$nzv)
+```
+
+No variables demonstrated near-zero-variance.
+
+## Building the model
+Next, the original training data was split into a 70% training and 30% validation set:
+```{r}
+set.seed(31415)
+inTrain <- createDataPartition(trainDataClean$classe, p=0.70, list=F)
+training <- trainDataClean[inTrain, ]
+validation <- trainDataClean[-inTrain, ]
+```
+
+I tested a few different models in this work. Due to space constraints in the report, I will only demonstrate the best performing model, Random Forest. I applied 10-fold cross validation to get an estimate of the OOB (out-of-bag) error estimate.
+```{r message = FALSE}
+trC <- trainControl(method = "cv", 10)
+finalModel <- train(classe ~ ., data = training, method = "rf", trControl = trC)
+finalModel
+finalModel$finalModel
+```
+
+So, the OOB estimate is 0.75%. I also tested the performance of the model on the validation set to get another, and arguably more independent, estimate of OOS (out-of-sample) error.
+```{r}
+finalPred <- predict(finalModel, validation[, -53])
+confusionMatrix(validation[, 53], finalPred)
+```
+
+The estimated OOS error (1 - accuracy) = 0.58%. In summary this seems to be a very good model without obvious signs of over-fitting.
+
+## Predicting on the test data
+Finally, I applied the model on the test data for the project quiz.
+```{r}
+testPred <- predict(finalModel, testDataClean[, -53])
+testPred
+```
+
+Nailed it! :-)
